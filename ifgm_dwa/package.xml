@@ -3,9 +3,14 @@
 <package format="3">
   <name>ifgm_dwa</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Implementation of a combined algorithm of Improved Follow the Gap and Dynamic Window Approach to control the autonomous car for the CoVAPSy challenge.</description>
   <maintainer email="elyass162005@gmail.com">elyass</maintainer>
   <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>bolide_interfaces</depend>
+  <depend>sensor_msgs</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

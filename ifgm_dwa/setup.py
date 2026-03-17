@@ -15,7 +15,7 @@ setup(
     zip_safe=True,
     maintainer='elyass',
     maintainer_email='elyass162005@gmail.com',
-    description='TODO: Package description',
+    description='Implementation of a combined algorithm of Improved Follow the Gap and Dynamic Window Approach to control the autonomous car for the CoVAPSy challenge.',
     license='Apache-2.0',
     extras_require={
         'test': [
