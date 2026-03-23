@@ -3,6 +3,7 @@ import math
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Float32
 
 
 class IFGMNode(Node):
@@ -16,6 +17,8 @@ class IFGMNode(Node):
             10
         )
 
+        self.dir_pub = self.create_publisher(Float32, '/cmd_dir', 10)
+
         self.latest_scan = None
         self.latest_ranges = []
         self.latest_angles = []
@@ -27,6 +30,9 @@ class IFGMNode(Node):
         self.best_gap = None
 
         self.safe_distance = 0.8
+        self.front_center_angle = math.pi          # 180° = front
+        self.front_half_width = math.pi / 2        # ±90°
+        self.max_steering_angle = math.radians(15.0)
 
         self.get_logger().info('IFGM node started, waiting for /scan ...')
 
@@ -52,10 +58,11 @@ class IFGMNode(Node):
         self.latest_ranges = clean_ranges
         self.latest_angles = angles
 
-        self.extract_front_view(math.pi / 2)
+        self.extract_front_view(self.front_half_width)
         self.build_free_mask()
         self.find_gaps()
         self.select_best_gap()
+        self.publish_dir()
 
         free_count = sum(self.free_mask)
         blocked_count = len(self.free_mask) - free_count
@@ -66,6 +73,8 @@ class IFGMNode(Node):
                 f'free: {free_count} | blocked: {blocked_count} | '
                 f'gaps: {len(self.gaps)} | '
                 f'best gap center angle: {self.best_gap["center_angle"]:.2f} rad | '
+                f'steering angle: {self.best_gap["steering_angle"]:.2f} rad | '
+                f'cmd_dir: {self.best_gap["cmd_dir"]:.2f} | '
                 f'width: {self.best_gap["width"]}'
             )
         else:
@@ -75,12 +84,21 @@ class IFGMNode(Node):
                 f'gaps: 0'
             )
 
+    def normalize_angle(self, angle):
+        while angle > math.pi:
+            angle -= 2.0 * math.pi
+        while angle < -math.pi:
+            angle += 2.0 * math.pi
+        return angle
+
     def extract_front_view(self, max_angle):
         self.front_ranges = []
         self.front_angles = []
 
         for angle, r in zip(self.latest_angles, self.latest_ranges):
-            if -max_angle <= angle <= max_angle:
+            relative_to_front = self.normalize_angle(angle - self.front_center_angle)
+
+            if abs(relative_to_front) <= max_angle:
                 self.front_angles.append(angle)
                 self.front_ranges.append(r)
 
@@ -88,8 +106,7 @@ class IFGMNode(Node):
         self.free_mask = []
 
         for r in self.front_ranges:
-            is_free = r > self.safe_distance
-            self.free_mask.append(is_free)
+            self.free_mask.append(r > self.safe_distance)
 
     def find_gaps(self):
         self.gaps = []
@@ -120,15 +137,35 @@ class IFGMNode(Node):
                 center_idx = (start_idx + end_idx) // 2
                 center_angle = self.front_angles[center_idx]
 
+                # positiver steering_angle = links, negativer = rechts
+                steering_angle = self.normalize_angle(
+                    self.front_center_angle - center_angle
+                )
+
+                cmd_dir = steering_angle / self.max_steering_angle
+                cmd_dir = max(-1.0, min(1.0, cmd_dir))
+
                 self.best_gap = {
                     'start_idx': start_idx,
                     'end_idx': end_idx,
                     'center_idx': center_idx,
                     'center_angle': center_angle,
+                    'steering_angle': steering_angle,
+                    'cmd_dir': cmd_dir,
                     'width': width,
                 }
 
                 widest_width = width
+
+    def publish_dir(self):
+        msg = Float32()
+
+        if self.best_gap is None:
+            msg.data = 0.0
+        else:
+            msg.data = float(self.best_gap['cmd_dir'])
+
+        self.dir_pub.publish(msg)
 
 
 def main(args=None):
