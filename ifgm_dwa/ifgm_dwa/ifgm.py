@@ -29,9 +29,11 @@ class IFGMNode(Node):
         self.gaps = []
         self.best_gap = None
 
-        self.safe_distance = 0.8
-        self.front_center_angle = math.pi          # 180° = front
-        self.front_half_width = math.pi / 2        # ±90°
+        self.last_steering_angle = 0
+
+        self.safe_distance = 0.3
+        self.front_center_angle = math.pi       # 180° = front
+        self.field_of_view = math.pi / 3        # ±60°
         self.max_steering_angle = math.radians(15.0)
 
         self.get_logger().info('IFGM node started, waiting for /scan ...')
@@ -58,7 +60,11 @@ class IFGMNode(Node):
         self.latest_ranges = clean_ranges
         self.latest_angles = angles
 
-        self.extract_front_view(self.front_half_width)
+        self.extract_front_view(self.field_of_view)
+
+        for a, r in zip(self.front_angles[:5], self.front_ranges[:5]):
+            print(f"angle: {a:.3f}")
+
         self.build_free_mask()
         self.find_gaps()
         self.select_best_gap()
@@ -92,21 +98,40 @@ class IFGMNode(Node):
         return angle
 
     def extract_front_view(self, max_angle):
-        self.front_ranges = []
-        self.front_angles = []
+        front_points = []
 
         for angle, r in zip(self.latest_angles, self.latest_ranges):
             relative_to_front = self.normalize_angle(angle - self.front_center_angle)
 
             if abs(relative_to_front) <= max_angle:
-                self.front_angles.append(angle)
-                self.front_ranges.append(r)
+                front_points.append((relative_to_front, r))
+
+        front_points.sort(key=lambda p: p[0])
+
+        self.front_angles = [p[0] for p in front_points]
+        self.front_ranges = [p[1] for p in front_points]
 
     def build_free_mask(self):
-        self.free_mask = []
+        raw_mask = []
 
         for r in self.front_ranges:
-            self.free_mask.append(r > self.safe_distance)
+            raw_mask.append(r > self.safe_distance)
+
+        self.free_mask = raw_mask[:]
+        self.inflate_obstacles(index_radius=3)
+
+    def inflate_obstacles(self, index_radius=3):
+        inflated = self.free_mask[:]
+
+        for i, is_free in enumerate(self.free_mask):
+            if not is_free:
+                start = max(0, i - index_radius)
+                end = min(len(inflated) - 1, i + index_radius)
+
+                for j in range(start, end + 1):
+                    inflated[j] = False
+
+        self.free_mask = inflated
 
     def find_gaps(self):
         self.gaps = []
@@ -128,34 +153,39 @@ class IFGMNode(Node):
         if not self.gaps:
             return
 
+        best_start = 0
+        best_end = -1
         widest_width = -1
 
+        # Erst nur das beste Gap finden
         for start_idx, end_idx in self.gaps:
             width = end_idx - start_idx + 1
 
             if width > widest_width:
-                center_idx = (start_idx + end_idx) // 2
-                center_angle = self.front_angles[center_idx]
-
-                # positiver steering_angle = links, negativer = rechts
-                steering_angle = self.normalize_angle(
-                    self.front_center_angle - center_angle
-                )
-
-                cmd_dir = steering_angle / self.max_steering_angle
-                cmd_dir = max(-1.0, min(1.0, cmd_dir))
-
-                self.best_gap = {
-                    'start_idx': start_idx,
-                    'end_idx': end_idx,
-                    'center_idx': center_idx,
-                    'center_angle': center_angle,
-                    'steering_angle': steering_angle,
-                    'cmd_dir': cmd_dir,
-                    'width': width,
-                }
-
                 widest_width = width
+                best_start = start_idx
+                best_end = end_idx
+
+        # Dann genau einmal alles Weitere berechnen
+        center_idx = (best_start + best_end) // 2
+        center_angle = self.front_angles[center_idx]
+
+        steering_angle = -0.8 * center_angle + 0.2 * self.last_steering_angle
+        self.last_steering_angle = steering_angle
+
+        cmd_dir = steering_angle / self.max_steering_angle
+        cmd_dir = max(-1.0, min(1.0, cmd_dir))
+
+        self.best_gap = {
+            'start_idx': best_start,
+            'end_idx': best_end,
+            'center_idx': center_idx,
+            'center_angle': center_angle,
+            'steering_angle': steering_angle,
+            'cmd_dir': cmd_dir,
+            'width': widest_width,
+        }
+
 
     def publish_dir(self):
         msg = Float32()

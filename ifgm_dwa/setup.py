@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'ifgm= ifgm_dwa.ifgm:main',
         ],
     },
 )
