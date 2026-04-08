@@ -10,6 +10,62 @@ class HybridGapFollowerNode(Node):
     def __init__(self):
         super().__init__('hybrid_gap_follower_node')
 
+        # =========================
+        # ROS parameters
+        # =========================
+
+        self.declare_parameter('max_speed_kmh', 28.0)
+        self.declare_parameter('max_steering_angle', 0.28)
+
+        self.declare_parameter('front_center_angle', math.pi)
+        self.declare_parameter('front_half_width_deg', 90.0)
+        self.declare_parameter('left_corridor_angle_deg', 240.0)
+        self.declare_parameter('right_corridor_angle_deg', 120.0)
+        self.declare_parameter('rear_center_angle', 0.0)
+
+        self.declare_parameter('safe_distance', 1.3)
+        self.declare_parameter('inflate_radius', 10)
+
+        self.declare_parameter('corridor_mode_distance', 1.8)
+        self.declare_parameter('very_tight_distance', 0.0)
+        self.declare_parameter('corridor_sector_half_width', 8)
+        self.declare_parameter('corridor_gain', 0.9)
+
+        self.declare_parameter('front_min_sector_half_width', 10)
+        self.declare_parameter('front_mean_sector_half_width', 25)
+        self.declare_parameter('rear_sector_half_width', 15)
+
+        self.declare_parameter('steering_smoothing', 0.75)
+        self.declare_parameter('max_steer_step', 0.035)
+        self.declare_parameter('aggressive_steering', 2.0)
+        self.declare_parameter('momentum', 0.5)
+
+        self.declare_parameter('open_speed_kmh', 5.0)
+        self.declare_parameter('tight_speed_kmh', 3.0)
+        self.declare_parameter('very_tight_speed_kmh', 2.0)
+        self.declare_parameter('steering_speed_penalty', 3.0)
+        self.declare_parameter('min_forward_speed_kmh', 1.0)
+
+        self.declare_parameter('front_stop_distance', 0.2)
+        self.declare_parameter('rear_block_distance', 0.35)
+        self.declare_parameter('reverse_speed_kmh', -2.0)
+        self.declare_parameter('reverse_steps_total', 12)
+
+        self.declare_parameter('gap_depth_min_clip', 0.5)
+        self.declare_parameter('gap_depth_max_clip', 3.0)
+        self.declare_parameter('gap_distance_weight', 2.0)
+        self.declare_parameter('gap_center_weight', 0.25)
+        self.declare_parameter('gap_edge_weight', 0.10)
+        self.declare_parameter('gap_width_score_weight', 1.0)
+        self.declare_parameter('gap_depth_score_weight', 1.8)
+
+        self.declare_parameter('log_every_n', 10)
+
+        self.load_parameters()
+
+        # =========================
+        # ROS interfaces
+        # =========================
         self.scan_sub = self.create_subscription(
             LaserScan,
             '/scan',
@@ -42,58 +98,157 @@ class HybridGapFollowerNode(Node):
         self.escape_mode = False
 
         self.log_counter = 0
-        self.log_every_n = 10
 
-        # =========================
-        # Limits
-        # =========================
-        self.max_speed_kmh = 28.0
-        self.max_steering_angle = 0.28  # rad
+        self.get_logger().info('Hybrid gap follower node started, waiting for scan ...')
 
-        # =========================
-        # Scan geometry
-        # =========================
-        self.front_center_angle = math.pi
-        self.front_half_width = math.radians(90.0)
+    def load_parameters(self):
+        self.max_speed_kmh = self.get_parameter(
+            'max_speed_kmh'
+        ).get_parameter_value().double_value
 
-        self.left_corridor_angle = math.radians(240.0)
-        self.right_corridor_angle = math.radians(120.0)
-        self.rear_center_angle = 0.0
+        self.max_steering_angle = self.get_parameter(
+            'max_steering_angle'
+        ).get_parameter_value().double_value
 
-        # =========================
-        # IFGM parameters
-        # =========================
-        self.safe_distance = 1.3
-        self.inflate_radius = 10
+        self.front_center_angle = self.get_parameter(
+            'front_center_angle'
+        ).get_parameter_value().double_value
 
-        # =========================
-        # Corridor assist
-        # =========================
-        self.corridor_mode_distance = 1.8
-        self.very_tight_distance = 0.8
-        self.corridor_sector_half_width = 8
-        self.corridor_gain = 0.9
+        self.front_half_width = math.radians(
+            self.get_parameter('front_half_width_deg').get_parameter_value().double_value
+        )
 
-        # =========================
-        # Steering / speed behavior
-        # =========================
-        self.steering_smoothing = 0.75
-        self.max_steer_step = 0.035
-        self.aggressive_steering = 2.5
-        self.momentum = 0.5
+        self.left_corridor_angle = math.radians(
+            self.get_parameter('left_corridor_angle_deg').get_parameter_value().double_value
+        )
 
-        self.open_speed_kmh = 5.0
-        self.tight_speed_kmh = 3.5
-        self.very_tight_speed_kmh = 2.5
+        self.right_corridor_angle = math.radians(
+            self.get_parameter('right_corridor_angle_deg').get_parameter_value().double_value
+        )
 
-        # =========================
-        # Emergency reverse
-        # =========================
-        self.front_stop_distance = 0.2
-        self.reverse_speed_kmh = -2.0
-        self.reverse_steps_total = 12
+        self.rear_center_angle = self.get_parameter(
+            'rear_center_angle'
+        ).get_parameter_value().double_value
 
-        self.get_logger().info('Hybrid gap follower node started, waiting for /scan ...')
+        self.safe_distance = self.get_parameter(
+            'safe_distance'
+        ).get_parameter_value().double_value
+
+        self.inflate_radius = self.get_parameter(
+            'inflate_radius'
+        ).get_parameter_value().integer_value
+
+        self.corridor_mode_distance = self.get_parameter(
+            'corridor_mode_distance'
+        ).get_parameter_value().double_value
+
+        self.very_tight_distance = self.get_parameter(
+            'very_tight_distance'
+        ).get_parameter_value().double_value
+
+        self.corridor_sector_half_width = self.get_parameter(
+            'corridor_sector_half_width'
+        ).get_parameter_value().integer_value
+
+        self.corridor_gain = self.get_parameter(
+            'corridor_gain'
+        ).get_parameter_value().double_value
+
+        self.front_min_sector_half_width = self.get_parameter(
+            'front_min_sector_half_width'
+        ).get_parameter_value().integer_value
+
+        self.front_mean_sector_half_width = self.get_parameter(
+            'front_mean_sector_half_width'
+        ).get_parameter_value().integer_value
+
+        self.rear_sector_half_width = self.get_parameter(
+            'rear_sector_half_width'
+        ).get_parameter_value().integer_value
+
+        self.steering_smoothing = self.get_parameter(
+            'steering_smoothing'
+        ).get_parameter_value().double_value
+
+        self.max_steer_step = self.get_parameter(
+            'max_steer_step'
+        ).get_parameter_value().double_value
+
+        self.aggressive_steering = self.get_parameter(
+            'aggressive_steering'
+        ).get_parameter_value().double_value
+
+        self.momentum = self.get_parameter(
+            'momentum'
+        ).get_parameter_value().double_value
+
+        self.open_speed_kmh = self.get_parameter(
+            'open_speed_kmh'
+        ).get_parameter_value().double_value
+
+        self.tight_speed_kmh = self.get_parameter(
+            'tight_speed_kmh'
+        ).get_parameter_value().double_value
+
+        self.very_tight_speed_kmh = self.get_parameter(
+            'very_tight_speed_kmh'
+        ).get_parameter_value().double_value
+
+        self.steering_speed_penalty = self.get_parameter(
+            'steering_speed_penalty'
+        ).get_parameter_value().double_value
+
+        self.min_forward_speed_kmh = self.get_parameter(
+            'min_forward_speed_kmh'
+        ).get_parameter_value().double_value
+
+        self.front_stop_distance = self.get_parameter(
+            'front_stop_distance'
+        ).get_parameter_value().double_value
+
+        self.rear_block_distance = self.get_parameter(
+            'rear_block_distance'
+        ).get_parameter_value().double_value
+
+        self.reverse_speed_kmh = self.get_parameter(
+            'reverse_speed_kmh'
+        ).get_parameter_value().double_value
+
+        self.reverse_steps_total = self.get_parameter(
+            'reverse_steps_total'
+        ).get_parameter_value().integer_value
+
+        self.gap_depth_min_clip = self.get_parameter(
+            'gap_depth_min_clip'
+        ).get_parameter_value().double_value
+
+        self.gap_depth_max_clip = self.get_parameter(
+            'gap_depth_max_clip'
+        ).get_parameter_value().double_value
+
+        self.gap_distance_weight = self.get_parameter(
+            'gap_distance_weight'
+        ).get_parameter_value().double_value
+
+        self.gap_center_weight = self.get_parameter(
+            'gap_center_weight'
+        ).get_parameter_value().double_value
+
+        self.gap_edge_weight = self.get_parameter(
+            'gap_edge_weight'
+        ).get_parameter_value().double_value
+
+        self.gap_width_score_weight = self.get_parameter(
+            'gap_width_score_weight'
+        ).get_parameter_value().double_value
+
+        self.gap_depth_score_weight = self.get_parameter(
+            'gap_depth_score_weight'
+        ).get_parameter_value().double_value
+
+        self.log_every_n = self.get_parameter(
+            'log_every_n'
+        ).get_parameter_value().integer_value
 
     @staticmethod
     def clamp(x, lo, hi):
@@ -211,7 +366,11 @@ class HybridGapFollowerNode(Node):
             center_score = -abs(i - gap_center)
             edge_bonus = min(i - start_idx, end_idx - i)
 
-            score = 2.0 * distance_score + 0.25 * center_score + 0.10 * edge_bonus
+            score = (
+                self.gap_distance_weight * distance_score
+                + self.gap_center_weight * center_score
+                + self.gap_edge_weight * edge_bonus
+            )
 
             if score > best_score:
                 best_score = score
@@ -230,7 +389,11 @@ class HybridGapFollowerNode(Node):
         for start_idx, end_idx in self.gaps:
             width = end_idx - start_idx + 1
             gap_ranges = self.front_ranges[start_idx:end_idx + 1]
-            mean_depth = self.clamp(self.mean(gap_ranges), 0.5, 3.0)
+            mean_depth = self.clamp(
+                self.mean(gap_ranges),
+                self.gap_depth_min_clip,
+                self.gap_depth_max_clip
+            )
 
             target_idx = self.choose_gap_target(start_idx, end_idx)
             target_angle = self.front_angles[target_idx]
@@ -246,7 +409,10 @@ class HybridGapFollowerNode(Node):
                 self.max_steering_angle
             )
 
-            score = 1.0 * width + 1.8 * mean_depth
+            score = (
+                self.gap_width_score_weight * width
+                + self.gap_depth_score_weight * mean_depth
+            )
 
             if score > best_score:
                 best_score = score
@@ -283,13 +449,13 @@ class HybridGapFollowerNode(Node):
 
     def compute_front_clearance(self):
         front_idx = self.angle_to_index(self.front_center_angle)
-        front_min = self.get_sector_min_by_index(front_idx, 10)
-        front_mean = self.get_sector_mean_by_index(front_idx, 25)
+        front_min = self.get_sector_min_by_index(front_idx, self.front_min_sector_half_width)
+        front_mean = self.get_sector_mean_by_index(front_idx, self.front_mean_sector_half_width)
         return front_min, front_mean
 
     def compute_rear_clearance(self):
         rear_idx = self.angle_to_index(self.rear_center_angle)
-        return self.get_sector_min_by_index(rear_idx, 15)
+        return self.get_sector_min_by_index(rear_idx, self.rear_sector_half_width)
 
     def blend_angles(self, gap_angle, corridor_angle, front_clearance):
         if front_clearance >= self.corridor_mode_distance:
@@ -328,8 +494,8 @@ class HybridGapFollowerNode(Node):
         else:
             target_speed = self.open_speed_kmh
 
-        target_speed -= 1.0 * abs(steering_angle)
-        return max(1.0, target_speed)
+        target_speed -= self.steering_speed_penalty * abs(steering_angle)
+        return max(self.min_forward_speed_kmh, target_speed)
 
     def choose_escape_steering(self):
         return 0.0
@@ -340,7 +506,7 @@ class HybridGapFollowerNode(Node):
         if self.reverse_counter > 0:
             self.reverse_counter -= 1
 
-            if rear_min < 0.35:
+            if rear_min < self.rear_block_distance:
                 self.escape_mode = False
                 self.reverse_counter = 0
                 return True, 0.0, 0.0, f'EMERGENCY REAR BLOCKED | rear_min: {rear_min:.2f}'
@@ -352,7 +518,7 @@ class HybridGapFollowerNode(Node):
             )
 
         if front_min < self.front_stop_distance:
-            if rear_min < 0.35:
+            if rear_min < self.rear_block_distance:
                 self.escape_mode = False
                 return True, 0.0, 0.0, (
                     f'EMERGENCY FRONT+REAR BLOCKED | front_min: {front_min:.2f} | rear_min: {rear_min:.2f}'
