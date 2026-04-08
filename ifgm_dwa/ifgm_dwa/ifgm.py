@@ -153,38 +153,48 @@ class IFGMNode(Node):
         if not self.gaps:
             return
 
-        best_start = 0
-        best_end = -1
-        widest_width = -1
+        best_score = -float('inf')
 
-        # Erst nur das beste Gap finden
         for start_idx, end_idx in self.gaps:
             width = end_idx - start_idx + 1
+            center_idx = (start_idx + end_idx) // 2
+            center_angle = self.front_angles[center_idx]
 
-            if width > widest_width:
-                widest_width = width
-                best_start = start_idx
-                best_end = end_idx
+            gap_ranges = self.front_ranges[start_idx:end_idx + 1]
+            mean_depth = sum(gap_ranges) / len(gap_ranges)
 
-        # Dann genau einmal alles Weitere berechnen
-        center_idx = (best_start + best_end) // 2
-        center_angle = self.front_angles[center_idx]
+            score = (
+                2.0 * width
+                + 1.5 * mean_depth
+                - 3.0 * abs(center_angle)
+            )
 
-        steering_angle = -0.8 * center_angle + 0.2 * self.last_steering_angle
-        self.last_steering_angle = steering_angle
+            if score > best_score:
+                best_score = score
 
-        cmd_dir = steering_angle / self.max_steering_angle
-        cmd_dir = max(-1.0, min(1.0, cmd_dir))
+                steering_angle = -0.8 * center_angle + 0.2 * self.last_steering_angle
+                steering_angle = max(
+                    -self.max_steering_angle,
+                    min(self.max_steering_angle, steering_angle)
+                )
 
-        self.best_gap = {
-            'start_idx': best_start,
-            'end_idx': best_end,
-            'center_idx': center_idx,
-            'center_angle': center_angle,
-            'steering_angle': steering_angle,
-            'cmd_dir': cmd_dir,
-            'width': widest_width,
-        }
+                cmd_dir = steering_angle / self.max_steering_angle
+                cmd_dir = max(-1.0, min(1.0, cmd_dir))
+
+                self.best_gap = {
+                    'start_idx': start_idx,
+                    'end_idx': end_idx,
+                    'center_idx': center_idx,
+                    'center_angle': center_angle,
+                    'steering_angle': steering_angle,
+                    'cmd_dir': cmd_dir,
+                    'width': width,
+                    'mean_depth': mean_depth,
+                    'score': score,
+                }
+
+        if self.best_gap is not None:
+            self.last_steering_angle = self.best_gap['steering_angle']
 
 
     def publish_dir(self):
