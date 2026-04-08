@@ -437,7 +437,7 @@ class HybridGapFollowerNode(Node):
         left_mean = self.get_sector_mean_by_index(left_idx, self.corridor_sector_half_width)
         right_mean = self.get_sector_mean_by_index(right_idx, self.corridor_sector_half_width)
 
-        diff = left_mean - right_mean
+        diff = right_mean - left_mean
         corridor_angle = self.corridor_gain * diff
         corridor_angle = self.clamp(
             corridor_angle,
