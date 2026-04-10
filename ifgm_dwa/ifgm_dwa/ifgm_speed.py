@@ -23,8 +23,8 @@ class HybridGapFollowerNode(Node):
         self.declare_parameter('right_corridor_angle_deg', 120.0)
         self.declare_parameter('rear_center_angle', 0.0)
 
-        self.declare_parameter('safe_distance', 1.3)
-        self.declare_parameter('inflate_radius', 10)
+        self.declare_parameter('safe_distance', 1.5)
+        self.declare_parameter('inflate_radius', 15)
 
         self.declare_parameter('corridor_mode_distance', 1.8)
         self.declare_parameter('very_tight_distance', 0.0)
@@ -35,18 +35,18 @@ class HybridGapFollowerNode(Node):
         self.declare_parameter('front_mean_sector_half_width', 25)
         self.declare_parameter('rear_sector_half_width', 15)
 
-        self.declare_parameter('steering_smoothing', 0.75)
-        self.declare_parameter('max_steer_step', 0.035)
+        self.declare_parameter('steering_smoothing', 0.0)
+        self.declare_parameter('max_steer_step', 0.1)
         self.declare_parameter('aggressive_steering', 2.0)
-        self.declare_parameter('momentum', 0.5)
+        self.declare_parameter('momentum', 0.2)
 
-        self.declare_parameter('open_speed_kmh', 5.0)
-        self.declare_parameter('tight_speed_kmh', 3.0)
-        self.declare_parameter('very_tight_speed_kmh', 2.0)
+        self.declare_parameter('open_speed_kmh', 3.0)
+        self.declare_parameter('tight_speed_kmh', 2.0)
+        self.declare_parameter('very_tight_speed_kmh', 1.0)
         self.declare_parameter('steering_speed_penalty', 3.0)
         self.declare_parameter('min_forward_speed_kmh', 1.0)
 
-        self.declare_parameter('front_stop_distance', 0.2)
+        self.declare_parameter('front_stop_distance', 0.25)
         self.declare_parameter('rear_block_distance', 0.35)
         self.declare_parameter('reverse_speed_kmh', -2.0)
         self.declare_parameter('reverse_steps_total', 12)
@@ -376,7 +376,7 @@ class HybridGapFollowerNode(Node):
                 best_score = score
                 best_idx = i
 
-        return best_idx
+        return best_idx ## used to be best_idx
 
     def select_best_gap(self):
         self.best_gap = None
