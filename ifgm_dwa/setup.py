@@ -26,6 +26,8 @@ setup(
         'console_scripts': [
             'ifgm= ifgm_dwa.ifgm:main',
             'ifgm_speed= ifgm_dwa.ifgm_speed:main',
+            'ifgm_gabriel= ifgm_dwa.ifgm_gabriel:main',
+            'ifgm_v1= ifgm_dwa.ifgm_v1:main',
         ],
     },
 )
