@@ -25,7 +25,7 @@ class HybridGapFollowerNode(Node):
         self.declare_parameter('right_corridor_angle_deg', 120.0)
         self.declare_parameter('rear_center_angle', 0.0)
 
-        self.declare_parameter('safe_distance', 1.5) # was 1.5
+        self.declare_parameter('safe_distance', 1.5)
         self.declare_parameter('inflate_radius', 15)
 
         self.declare_parameter('corridor_mode_distance', 1.4)
@@ -33,35 +33,35 @@ class HybridGapFollowerNode(Node):
         self.declare_parameter('corridor_sector_half_width', 8)
         self.declare_parameter('corridor_gain', 0.9)
 
-        self.declare_parameter('front_min_sector_half_width', 10) # was 10
+        self.declare_parameter('front_min_sector_half_width', 30)
         self.declare_parameter('front_mean_sector_half_width', 25)
         self.declare_parameter('rear_sector_half_width', 15)
 
         self.declare_parameter('steering_smoothing', 0.0)
-        self.declare_parameter('max_steer_step', 0.07) # was 0.1
+        self.declare_parameter('max_steer_step', 0.07)
         self.declare_parameter('aggressive_steering', 2.0)
-        self.declare_parameter('momentum', 0.0) # was 0.2
+        self.declare_parameter('momentum', 0.0)
 
-        self.declare_parameter('open_speed_kmh', 1.0) # was 1.5
-        self.declare_parameter('tight_speed_kmh', 0.5) # was 1.0
-        self.declare_parameter('very_tight_speed_kmh', 0.2) # was 0.5
+        self.declare_parameter('open_speed_kmh', 1.0)
+        self.declare_parameter('tight_speed_kmh', 0.5)
+        self.declare_parameter('very_tight_speed_kmh', 0.2)
         self.declare_parameter('steering_speed_penalty', 3.0)
         self.declare_parameter('min_forward_speed_kmh', 0.5)
 
-        self.declare_parameter('front_stop_distance', 0.35)
+        self.declare_parameter('front_stop_distance', 0.4)
         self.declare_parameter('rear_block_distance', 0.15)
         self.declare_parameter('reverse_speed_kmh', -8.0)
-        self.declare_parameter('reverse_steps_total', 50) # was 10
+        self.declare_parameter('reverse_steps_total', 50)
         self.declare_parameter('reverse_neutral_steps', 4)
         self.declare_parameter('reverse_pulse_steps', 8)
         self.declare_parameter('reverse_final_steps', 24)
 
         self.declare_parameter('gap_depth_min_clip', 0.5)
         self.declare_parameter('gap_depth_max_clip', 5.0)
-        self.declare_parameter('gap_distance_weight', 0.0) # was 2.0
-        self.declare_parameter('gap_center_weight', 0.5) # was 0.1
-        self.declare_parameter('gap_edge_weight', 1.5) # was 0.1
-        self.declare_parameter('gap_width_score_weight', 1.5) # was 1.0
+        self.declare_parameter('gap_distance_weight', 0.0)
+        self.declare_parameter('gap_center_weight', 0.5)
+        self.declare_parameter('gap_edge_weight', 1.5)
+        self.declare_parameter('gap_width_score_weight', 1.5)
         self.declare_parameter('gap_depth_score_weight', 1.8)
 
         self.declare_parameter('log_every_n', 10)
@@ -69,6 +69,13 @@ class HybridGapFollowerNode(Node):
         self.declare_parameter('stationary_speed_threshold', 0.2)
         self.declare_parameter('stationary_cycles_trigger', 12)
         self.declare_parameter('rear_ir_block_distance', 0.15)
+
+        # =========================
+        # NEW: lidar close-wall recovery parameters
+        # =========================
+        self.declare_parameter('lidar_invalid_reuse_distance', 0.25)
+        self.declare_parameter('lidar_invalid_max_hold_cycles', 6)
+        self.declare_parameter('lidar_fallback_distance', 3.0)
 
         self.load_parameters()
 
@@ -127,7 +134,6 @@ class HybridGapFollowerNode(Node):
         # 4 = reverse_2
 
         self.sequence_counter = 0
-
         self.log_counter = 0
 
         # =========================
@@ -139,6 +145,12 @@ class HybridGapFollowerNode(Node):
         self.have_fork_data = False
         self.have_rear_range_data = False
         self.stationary_counter = 0
+
+        # =========================
+        # NEW: lidar history for invalid close-range recovery
+        # =========================
+        self.prev_ranges = []
+        self.invalid_hold_counters = []
 
         self.get_logger().info('Hybrid gap follower node started, waiting for scan ...')
 
@@ -303,7 +315,6 @@ class HybridGapFollowerNode(Node):
             'log_every_n'
         ).get_parameter_value().integer_value
 
-        # NEW
         self.stationary_speed_threshold = self.get_parameter(
             'stationary_speed_threshold'
         ).get_parameter_value().double_value
@@ -314,6 +325,19 @@ class HybridGapFollowerNode(Node):
 
         self.rear_ir_block_distance = self.get_parameter(
             'rear_ir_block_distance'
+        ).get_parameter_value().double_value
+
+        # NEW
+        self.lidar_invalid_reuse_distance = self.get_parameter(
+            'lidar_invalid_reuse_distance'
+        ).get_parameter_value().double_value
+
+        self.lidar_invalid_max_hold_cycles = self.get_parameter(
+            'lidar_invalid_max_hold_cycles'
+        ).get_parameter_value().integer_value
+
+        self.lidar_fallback_distance = self.get_parameter(
+            'lidar_fallback_distance'
         ).get_parameter_value().double_value
 
     @staticmethod
@@ -337,24 +361,56 @@ class HybridGapFollowerNode(Node):
     def sanitize_scan(self, msg: LaserScan):
         self.latest_scan = msg
 
+        n = len(msg.ranges)
+
+        if len(self.invalid_hold_counters) != n:
+            self.invalid_hold_counters = [0] * n
+
         clean_ranges = []
         angles = []
 
         for i, r in enumerate(msg.ranges):
             angle = msg.angle_min + i * msg.angle_increment
 
-            if math.isinf(r):
-                clean_r = 3.0 # was msg.range_max
-            elif math.isnan(r):
-                clean_r = 3.0 # was msg.range_min
+            is_invalid = math.isinf(r) or math.isnan(r)
+
+            if is_invalid:
+                reused_previous = False
+
+                if i < len(self.prev_ranges):
+                    prev_r = self.prev_ranges[i]
+
+                    # If the beam was very close in the previous scan,
+                    # keep that value for a few cycles instead of turning
+                    # it into "free space".
+                    if (
+                        prev_r <= self.lidar_invalid_reuse_distance and
+                        self.invalid_hold_counters[i] < self.lidar_invalid_max_hold_cycles
+                    ):
+                        clean_r = prev_r
+                        self.invalid_hold_counters[i] += 1
+                        reused_previous = True
+
+                if not reused_previous:
+                    clean_r = self.clamp(
+                        self.lidar_fallback_distance,
+                        msg.range_min,
+                        self.lidar_fallback_distance
+                    )
+                    self.invalid_hold_counters[i] = 0
+
             else:
-                clean_r = self.clamp(r, msg.range_min, 3.0) # was 5.0
+                clean_r = self.clamp(r, msg.range_min, self.lidar_fallback_distance)
+                self.invalid_hold_counters[i] = 0
 
             clean_ranges.append(clean_r)
             angles.append(angle)
 
         self.latest_ranges = clean_ranges
         self.latest_angles = angles
+
+        # Save for next cycle
+        self.prev_ranges = clean_ranges[:]
 
     # =========================
     # NEW: sensor callbacks
@@ -625,7 +681,6 @@ class HybridGapFollowerNode(Node):
         rear_left = self.latest_rear_ir_left if self.have_rear_range_data else float('nan')
         rear_has_room = self.rear_has_room_for_reverse()
 
-        # Abort active reverse sequence if rear gets blocked
         if self.reverse_sequence_stage in (2, 4) and not rear_has_room:
             self.escape_mode = False
             self.reverse_sequence_stage = 0
@@ -634,9 +689,6 @@ class HybridGapFollowerNode(Node):
                 f'EMERGENCY REAR BLOCKED | rear_ir_right: {rear_right:.2f} | rear_ir_left: {rear_left:.2f}'
             )
 
-        # =========================
-        # Stage 1: neutral
-        # =========================
         if self.reverse_sequence_stage == 1:
             self.escape_mode = True
             self.sequence_counter += 1
@@ -650,9 +702,6 @@ class HybridGapFollowerNode(Node):
                 f'front_min: {front_min:.2f} | rear_ir_right: {rear_right:.2f} | rear_ir_left: {rear_left:.2f}'
             )
 
-        # =========================
-        # Stage 2: first reverse pulse
-        # =========================
         if self.reverse_sequence_stage == 2:
             self.escape_mode = True
             self.sequence_counter += 1
@@ -666,9 +715,6 @@ class HybridGapFollowerNode(Node):
                 f'front_min: {front_min:.2f} | rear_ir_right: {rear_right:.2f} | rear_ir_left: {rear_left:.2f}'
             )
 
-        # =========================
-        # Stage 3: neutral again
-        # =========================
         if self.reverse_sequence_stage == 3:
             self.escape_mode = True
             self.sequence_counter += 1
@@ -682,9 +728,6 @@ class HybridGapFollowerNode(Node):
                 f'front_min: {front_min:.2f} | rear_ir_right: {rear_right:.2f} | rear_ir_left: {rear_left:.2f}'
             )
 
-        # =========================
-        # Stage 4: actual reverse
-        # =========================
         if self.reverse_sequence_stage == 4:
             self.escape_mode = True
             self.sequence_counter += 1
@@ -699,9 +742,6 @@ class HybridGapFollowerNode(Node):
                 f'front_min: {front_min:.2f} | rear_ir_right: {rear_right:.2f} | rear_ir_left: {rear_left:.2f}'
             )
 
-        # =========================
-        # Idle: decide whether to start reverse sequence
-        # =========================
         front_blocked = front_min < self.front_stop_distance
         stuck_too_long = self.stationary_counter >= self.stationary_cycles_trigger
 
@@ -761,7 +801,6 @@ class HybridGapFollowerNode(Node):
         corridor_angle, left_mean, right_mean = self.compute_corridor_angle()
         front_min, front_mean = self.compute_front_clearance()
 
-        # NEW: update "stuck" counter from fork speed before escape logic
         self.update_stationary_state()
 
         emergency_active, emergency_speed, emergency_angle, emergency_msg = self.emergency_escape_control(front_min)
